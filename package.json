@@ -1,0 +1,26 @@
+{
+  "name": "s3-image-store",
+  "version": "0.0.1",
+  "description": "",
+  "keywords": [
+    "aws",
+    "s3",
+    "image"
+  ],
+  "repository": {
+    "url": "https://github.com/OptimusLime/s3-image-store",
+    "type": "git"
+  },
+  "main": "lib/s3-store.js",
+  "dependencies": {
+    "optimuslime-traverse": "*",
+    "node-redis" : "*",
+    "win-utils" : "*"
+  },
+  "devDependencies": {
+    "colors": "*",
+    "q": "*",
+    "should": "*",
+    "mocha": "*"
+  }
+}
