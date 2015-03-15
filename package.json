@@ -13,13 +13,16 @@
   },
   "main": "lib/s3-store.js",
   "dependencies": {
+    "aws-sdk" : "*",
     "optimuslime-traverse": "*",
-    "node-redis" : "*",
+    "redis" : "*",
+    "q": "*",
     "win-utils" : "*"
   },
   "devDependencies": {
+    "superagent" : "*",
     "colors": "*",
-    "q": "*",
+   
     "should": "*",
     "mocha": "*"
   }
