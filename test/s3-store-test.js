@@ -9,7 +9,7 @@ var http = require('http');
 var traverse = require('optimuslime-traverse');
 
 //handle put requests for objects to s3
-var request = require('superagent');
+// var request = require('superagent');
 
 var Q = require('q');
 

@@ -20,7 +20,6 @@
     "win-utils" : "*"
   },
   "devDependencies": {
-    "superagent" : "*",
     "colors": "*",
    
     "should": "*",
