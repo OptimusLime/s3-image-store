@@ -307,6 +307,135 @@ describe('Testing S3 Store API -',function(){
             })
     });
 
+      it('S3 loading/complete should fail',function(done){
+
+        this.timeout(15000);
+        
+        var configLocation = __dirname + "/../access-credentials.json";
+          //grab our access info
+        var accessInfo = JSON.parse(fs.readFileSync(configLocation));
+
+
+        console.log('\t S3 Store Config Info:  '.blue, accessInfo);
+
+        //load in our config info
+        AWS.config.loadFromPath(configLocation);
+        
+        //set region plz
+        if(!AWS.config.region)
+            AWS.config.region = 'us-east-1';
+
+        var createFiles = function(props)
+        {
+            //we will create 4 files -- pulling info from props
+            var user = props.user;
+
+            var prepend = user + "/";
+
+            return [
+                {prepend: prepend, append: "/smallImage"},
+                {prepend: prepend, append: "/mediumImage"},
+                {prepend: prepend, append: "/largeImage"},
+                {prepend: prepend, append: "/xLargeImage"}
+            ];
+        }
+
+        //create our s3 storage object
+        s3StoreObject = new S3StoreClass(accessInfo, createFiles, redisClient);
+
+        //grab bucket info -- this is where we're doing our read/writes
+        var bucketName = accessInfo.bucket;
+
+        //where do we access?
+        var s3 = new AWS.S3({params: {Bucket: bucketName}});
+
+        //lets make a request to initialize
+        var props = {user: "bobsyouruncle"};
+        
+
+        var localUploadRequest;
+
+        var skip = false;
+
+
+        var testParams = {Key: 'tests/s3-upload-test', Body: 'Hello!'};
+
+        console.log('\t Test S3 Bucket Upload Access: '.blue, testParams);
+
+        asyncTestS3(s3, testParams)
+            .then(function()
+            {
+                console.log('\t Begin inititalization: '.blue, props);
+                return s3StoreObject.asyncInitializeUpload(props);
+            })
+            .then(function(uploadInfo)
+            {
+                //we have info on uploads
+                //lets complete them!
+
+                console.log('\t Uploads inititalized: '.magenta, uploadInfo);
+
+                //save whole request
+                localUploadRequest = uploadInfo;
+
+                //we should have the uploads
+                var fullUploads = uploadInfo.uploads;
+
+                //lets do the uploads
+                var promised = [];
+
+                for(var i=0; i < fullUploads.length - 1; i++)
+                {
+                    var upReq = fullUploads[i];
+
+                    promised.push(asyncUploadS3(JSON.stringify({image: i}), upReq.url, accessInfo.bucket));
+                }
+
+                return Q.allSettled(promised);
+            })
+            .then(function(results)
+            {
+                //we've sent it
+                //now confirm it's done
+                console.log("\t Results from uploads: ".blue, ins(results,1));
+
+                //check if done
+                var missing = [];
+                for(var i=0; i < results.length; i++)
+                {
+                    var res = results[i];
+                    if(res.state !== "fulfilled")
+                        missing.push(i);
+                }
+
+                if(missing.length)
+                    throw new Error("Uplaods failed" + JSON.stringify(missing));
+
+                //otherwise, we check if completed
+                return s3StoreObject.asyncConfirmUploadComplete(localUploadRequest.uuid);
+            })
+            .then(function(res)
+            {
+
+                //now we verify it worked!
+                res.success.should.equal(false);
+
+                //we should be missing some objects, plz!
+                res.error.should.equal(s3StoreObject.uploadErrors.headCheckMissingError);
+
+                //all confirmed
+                console.log("\t Confirmed response should fail: ".green, res);
+
+                done();
+            })
+            .catch(function(err)
+            {
+                console.log('\t Error detected: '.red, err);
+
+                done(new Error(err));
+            })
+    });
+
 
     it('S3 get presigned requests',function(done){
 
