@@ -48,31 +48,52 @@ function asyncTestS3(s3, params)
     return defer.promise;
 }
 
-function asyncTestGetS3(location, credentials)
+function asyncGetS3(location, bucket)
 {
-    var defer = Q.defer();
+     var defer = Q.defer();
 
-    console.log("\t Making get request: ".cyan, location, " with value: ".blue, value);
+        var options = {
+          host: bucket + ".s3.amazonaws.com",
+          port: 80,
+          path: location,
+          headers: {
+            // "User-Agent": "curl/7.30.0",
+            // "Accept" : "*/*"
+          },
+          method: 'GET'
+        };
 
-    //where we goin with it???
-    request
-        .get(location)
-        // .set('X-API-Key', 'foobar')
-        // .set("x-amz-acl", "public-read")
-        // .set('Content-Type', 'application/json')
-        // .set('Content-Length', Buffer.byteLength(value))
-        // .send(value)
-        .end(function(err, res){
-            
-            console.log('Amz responded!'.green);
+        var req = http.request(options, function(res) {
+          // console.log('STATUS: ' + res.statusCode);
+          // console.log('HEADERS: ' + JSON.stringify(res.headers));
+          res.setEncoding('utf8');
 
-            if(!err)
-                defer.resolve(res);
-            else
-                defer.reject(err);
+        var ret = "";
+          res.on('data', function (chunk) {
+            // console.log('BODY: ' + chunk);
+            ret += chunk;
+          });
+
+          res.on('end', function()
+          {
+              if(res.statusCode != 200)
+              {
+                defer.reject(res);
+              }
+              else
+                defer.resolve(ret);
+          })
+
         });
 
-    return defer.promise;
+        req.on('error', function(e) {
+          console.log('problem with request: ' + e.message);
+          defer.reject(e);
+        });
+
+        req.end();
+
+    return defer.promise;   
 }
 
 function asyncUploadS3(value, location, bucket, expires)
@@ -166,6 +187,8 @@ describe('Testing S3 Store API -',function(){
 
      it('S3 loading/comlpete simple check',function(done){
 
+        this.timeout(15000);
+        
         var configLocation = __dirname + "/../access-credentials.json";
           //grab our access info
         var accessInfo = JSON.parse(fs.readFileSync(configLocation));
@@ -221,7 +244,7 @@ describe('Testing S3 Store API -',function(){
             .then(function()
             {
                 console.log('\t Begin inititalization: '.blue, props);
-                return s3StoreObject.initializeUpload(props);
+                return s3StoreObject.asyncInitializeUpload(props);
             })
             .then(function(uploadInfo)
             {
@@ -267,7 +290,7 @@ describe('Testing S3 Store API -',function(){
                     throw new Error("Uplaods failed" + JSON.stringify(missing));
 
                 //otherwise, we check if completed
-                return s3StoreObject.confirmUploadComplete(localUploadRequest.uuid);
+                return s3StoreObject.asyncConfirmUploadComplete(localUploadRequest.uuid);
             })
             .then(function(res)
             {
@@ -282,8 +305,179 @@ describe('Testing S3 Store API -',function(){
 
                 done(new Error(err));
             })
+    });
+
+
+    it('S3 get presigned requests',function(done){
+
+        this.timeout(15000);
+        
+        var configLocation = __dirname + "/../access-credentials.json";
+          //grab our access info
+        var accessInfo = JSON.parse(fs.readFileSync(configLocation));
+
+        //load in our config info
+        AWS.config.loadFromPath(configLocation);
+        
+        //set region plz
+        if(!AWS.config.region)
+            AWS.config.region = 'us-east-1';
+
+        var createFiles = function(props)
+        {
+            //we will create 4 files -- pulling info from props
+            var user = props.user;
+
+            var prepend = user + "/";
+
+            return [
+                {prepend: prepend, append: "/smallImage"},
+                {prepend: prepend, append: "/mediumImage"},
+                {prepend: prepend, append: "/largeImage"},
+                {prepend: prepend, append: "/xLargeImage"}
+            ];
+        }
+
+        //create our s3 storage object
+        s3StoreObject = new S3StoreClass(accessInfo, createFiles, redisClient);
+
+        //grab bucket info -- this is where we're doing our read/writes
+        var bucketName = accessInfo.bucket;
+
+        //where do we access?
+        var s3 = new AWS.S3({params: {Bucket: bucketName}});
+
+        //lets make a request to initialize
+        var props = {user: "bobsyouruncle"};
+
+        var localUploadRequest;
+
+        var skip = false;
+
+
+        var testParams = {Key: 'tests/s3-upload-test', Body: 'Hello!'};
+
+        console.log('\t Test S3 Bucket Upload Access: '.blue, testParams);
+
+        asyncTestS3(s3, testParams)
+            .then(function()
+            {
+                console.log('\t Begin inititalization: '.blue, props);
+                return s3StoreObject.asyncInitializeUpload(props);
+            })
+            .then(function(uploadInfo)
+            {
+                //we have info on uploads
+                //lets complete them!
+
+                console.log('\t Uploads inititalized: '.magenta, uploadInfo);
+
+                //save whole request
+                localUploadRequest = uploadInfo;
+
+                //we should have the uploads
+                var fullUploads = uploadInfo.uploads;
+
+                //lets do the uploads
+                var promised = [];
+
+                for(var i=0; i < fullUploads.length; i++)
+                {
+                    var upReq = fullUploads[i];
+
+                    promised.push(asyncUploadS3(JSON.stringify({image: i}), upReq.url, accessInfo.bucket));
+                }
+
+                return Q.allSettled(promised);
+            })
+            .then(function(results)
+            {
+                //we've sent it
+                //now confirm it's done
+                console.log("\t Results from uploads: ".blue, ins(results,1));
+
+                //check if done
+                var missing = [];
+                for(var i=0; i < results.length; i++)
+                {
+                    var res = results[i];
+                    if(res.state !== "fulfilled")
+                        missing.push(i);
+                }
+
+                if(missing.length)
+                    throw new Error("Uplaods failed" + JSON.stringify(missing));
+
+                //otherwise, we check if completed
+                return s3StoreObject.asyncConfirmUploadComplete(localUploadRequest.uuid);
+            })
+            .then(function(res)
+            {
+                //now we verify it worked!
+                res.success.should.equal(true);
+
+                //now we're finally ready to access the same objects again!
+                 var fullUploads = localUploadRequest.uploads;
+
+                 var fileLocations = [];
+
+                 for(var i=0; i < fullUploads.length; i++)
+                 {
+                    fileLocations.push(fullUploads[i].request.Key);
+                 }
+
+                 console.log('\t Fetching file access: '.cyan, fileLocations);
+
+                 var accessURLs = s3StoreObject.generateObjectAccess(fileLocations);
+
+                 //lets get all the objects!
+                 var promised = [];
+
+                for(var i=0; i < fileLocations.length; i++)
+                {
+                    var getURL = accessURLs[fileLocations[i]];
+
+                    promised.push(asyncGetS3(getURL, accessInfo.bucket));
+                }
+
+                return Q.allSettled(promised);
+            })
+            .then(function(results)
+            {
+
+                console.log('\t GET Return Values: '.cyan, results);
+
+                var objects = {};
+
+                var missing = [];
+                for(var i=0; i < results.length; i++)
+                {
+                    var res = results[i];
+                    if(res.state !== "fulfilled")
+                        missing.push(i);
+                    else
+                        objects[i] = JSON.parse(res.value);
+                }
+
+                if(missing.length)
+                    throw new Error("GETs Failed");
+
+                //now we need to look and validate all of them
+                objects[0].image.should.equal(0);
+                objects[1].image.should.equal(1);
+                objects[2].image.should.equal(2);
+                objects[3].image.should.equal(3);
+
+                done();
+
+            })
+            .catch(function(err)
+            {
+                console.log('\t Error detected: '.red, err);
+
+                done(new Error(err));
+            })
 
 
     });
-
 });
