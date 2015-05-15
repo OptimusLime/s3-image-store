@@ -105,7 +105,7 @@ function asyncUploadS3(value, location, bucket, expires)
           port: 80,
           path: location,
           headers: {
-            "User-Agent": "curl/7.30.0",
+            // "User-Agent": "curl/7.30.0",
             "Accept" : "*/*",
             // "x-amz-acl" : "public-read",
             // "Content-Type" : "application/json",
@@ -114,7 +114,9 @@ function asyncUploadS3(value, location, bucket, expires)
           method: 'PUT'
         };
 
+	console.log('\tUpload to '.cyan + options.path); 
         var req = http.request(options, function(res) {
+            // console.log(req);
           // console.log('STATUS: ' + res.statusCode);
           // console.log('HEADERS: ' + JSON.stringify(res.headers));
           res.setEncoding('utf8');
